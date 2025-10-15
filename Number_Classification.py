@@ -58,7 +58,7 @@ plt.xticks([])
 plt.yticks([])
 plt.show()
 
-# Confusion Matrix
+#Confusion Matrix
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 import numpy as np
