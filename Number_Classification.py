@@ -57,3 +57,21 @@ plt.title(" Label: {} Pred: {} ".format(mnist_y_test[k].item(), mnist_y_test_pre
 plt.xticks([])
 plt.yticks([])
 plt.show()
+
+# Confusion Matrix
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Digits 0 through 9 for the labels
+labels = np.arange(10)
+
+# Compute confusion matrix
+cm = confusion_matrix(mnist_y_test, mnist_y_test_pred, labels=labels)
+
+# Display it
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
+disp.plot(cmap="Blues", values_format="d")
+plt.title("Confusion Matrix: KNN MNIST Classifier (k=10)")
+plt.tight_layout()
+plt.show()
