@@ -1,0 +1,274 @@
+!pip install ray lz4
+
+import gymnasium as gym
+
+env = gym.make("CartPole-v1",render_mode='rgb_array')
+env.action_space # move left or right = 2 options
+
+# print out an example state from the environment
+env.reset() # cart position, cart velocity, pole angle, pole angular velocity
+env.step(env.action_space.sample())
+
+# returns an initial observation
+env.reset()
+
+
+for i in range(20):
+  # env.action_space.sample() produces either 0 (left) or 1 (right).
+  observation, reward, done, truncated, info = env.step(env.action_space.sample())
+  print("step", i, observation, reward, done, info)
+
+env.close()
+
+# This captures a video of the agent acting randomly in the environment.
+# It helps us visualize the baseline before any learning happens.
+
+
+from gym.wrappers.monitoring.video_recorder import VideoRecorder
+
+before_training = "before_training.mp4"
+video = VideoRecorder(env, before_training)
+
+# returns an initial observation
+env.reset()
+
+for i in range(200):
+    env.render()
+    video.capture_frame()
+    # env.action_space.sample() produces either 0 (left) or 1 (right).
+    observation, reward, done, trunc, info = env.step(env.action_space.sample())
+    # Not printing this time
+    #print("step", i, observation, reward, done, info)
+
+
+video.close()
+env.close()
+
+from base64 import b64encode
+
+def render_mp4(videopath: str) -> str:
+
+    """
+    Gets a string containing a b4-encoded version of the MP4 video
+    at the specified path.
+    """
+
+    mp4 = open(videopath, 'rb').read()
+    base64_encoded_mp4 = b64encode(mp4).decode()
+    return f'<video width=400 controls><source src="data:video/mp4;' \
+         f'base64,{base64_encoded_mp4}" type="video/mp4"></video>'
+
+from IPython.display import HTML
+html = render_mp4(before_training)
+HTML(html)
+
+from collections import defaultdict
+import gymnasium as gym
+import numpy as np
+
+
+class CartPoleAgent:
+    def __init__(
+        self,
+        env: gym.Env,
+        bins: int,
+        learning_rate: float,
+        initial_epsilon: float,
+        epsilon_decay: float,
+        final_epsilon: float,
+        discount_factor: float = 0.99,
+    ):
+        self.env = env
+        self.lr = learning_rate
+        self.discount_factor = discount_factor
+        self.epsilon = initial_epsilon
+        self.epsilon_decay = epsilon_decay
+        self.final_epsilon = final_epsilon
+        self.training_error = []
+
+        self.bins = [np.linspace(-4.8, 4.8, bins),              # cart position
+                     np.linspace(-4, 4, bins),                  # cart velocity
+                     np.linspace(-0.418, 0.418, bins),          # pole angle
+                     np.linspace(-4, 4, bins)]                  # pole velocity at tip
+
+        self.q_values = defaultdict(lambda: np.zeros(env.action_space.n))
+
+    def discretize(self, obs: np.ndarray) -> tuple:
+        return tuple(int(np.digitize(obs[i], self.bins[i])) for i in range(len(obs)))
+
+    def get_action(self, obs: np.ndarray) -> int:
+        state = self.discretize(obs)
+        if np.random.random() < self.epsilon:
+            return self.env.action_space.sample()
+        else:
+            return int(np.argmax(self.q_values[state]))
+
+    def update(self, obs, action, reward, terminated, next_obs):
+        state = self.discretize(obs)
+        next_state = self.discretize(next_obs)
+        future_q = (not terminated) * np.max(self.q_values[next_state])
+        td_error = reward + self.discount_factor * future_q - self.q_values[state][action]
+        self.q_values[state][action] += self.lr * td_error
+        self.training_error.append(td_error)
+
+    def decay_epsilon(self):
+        self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)
+
+from tqdm import tqdm
+
+# hyperparameters
+learning_rate = 0.1
+n_episodes = 20000
+start_epsilon = 1.0
+epsilon_decay = start_epsilon / (n_episodes / 2)
+final_epsilon = 0.05
+n_bins = 8  # discretization resolution
+
+env = gym.wrappers.RecordEpisodeStatistics(env, buffer_length=n_episodes)
+
+agent = CartPoleAgent(
+    env=env,
+    bins=n_bins,
+    learning_rate=learning_rate,
+    initial_epsilon=start_epsilon,
+    epsilon_decay=epsilon_decay,
+    final_epsilon=final_epsilon,
+)
+
+for episode in tqdm(range(n_episodes)):
+    obs, _ = env.reset()
+    done = False
+
+    while not done:
+        action = agent.get_action(obs)
+        next_obs, reward, terminated, truncated, _ = env.step(action)
+        agent.update(obs, action, reward, terminated, next_obs)
+        obs = next_obs
+        done = terminated or truncated
+
+    agent.decay_epsilon()
+
+import matplotlib.pyplot as plt
+
+def get_moving_avgs(arr, window, convolution_mode):
+    return np.convolve(np.array(arr).flatten(), np.ones(window), mode=convolution_mode) / window
+
+rolling_length = 500
+fig, axs = plt.subplots(ncols=3, figsize=(12, 5))
+
+axs[0].set_title("Episode rewards")
+reward_moving_average = get_moving_avgs(env.return_queue, rolling_length, "valid")
+axs[0].plot(range(len(reward_moving_average)), reward_moving_average)
+
+axs[1].set_title("Episode lengths")
+length_moving_average = get_moving_avgs(env.length_queue, rolling_length, "valid")
+axs[1].plot(range(len(length_moving_average)), length_moving_average)
+
+axs[2].set_title("Training Error")
+training_error_moving_average = get_moving_avgs(agent.training_error, rolling_length, "same")
+axs[2].plot(range(len(training_error_moving_average)), training_error_moving_average)
+
+plt.tight_layout()
+plt.show()
+
+# we will also record a video of an episode
+# luckily gym has built in functions for this
+import os
+
+video_dir = "./cartpole_videos"
+eval_env = gym.make("CartPole-v1", render_mode="rgb_array")
+eval_env = gym.wrappers.RecordVideo(eval_env, video_dir, episode_trigger=lambda x: True)
+
+# Greedy policy: no exploration
+agent.epsilon = 0.0
+obs, _ = eval_env.reset()
+done = False
+
+while not done:
+    action = agent.get_action(obs)
+    obs, reward, terminated, truncated, _ = eval_env.step(action)
+    done = terminated or truncated
+
+eval_env.close()
+
+from IPython.display import Video
+
+Video(f"{video_dir}/rl-video-episode-0.mp4", embed=True)
+
+import ray
+from ray.rllib.algorithms.ppo import PPOConfig, PPO
+from pprint import pprint
+
+
+config = {
+    "env": "CartPole-v1",
+    "framework": "torch",
+    "num_workers": 1, # 1 worker + 1 driver = 2 cpus total
+    "model": {
+      "fcnet_hiddens": [32],
+      "fcnet_activation": "linear",
+    },
+}
+
+stop = {'env_runners/episode_return_mean': 195}
+
+ray.init(num_cpus=2)
+
+analysis = ray.tune.run(
+  "PPO",
+  config=config,
+  stop=stop,
+  checkpoint_at_end=True,
+)
+
+trial = analysis.get_best_trial("episode_return_mean", "max")
+
+checkpoint = analysis.get_best_checkpoint(
+  trial,
+  "training_iteration",
+  "max",
+)
+
+algo = PPO(config=config)
+algo.restore(checkpoint)
+
+# if you get an error message about np.bool8
+# uncomment the next line and rerun the cell:
+# np.bool8 = bool
+import numpy as np
+import torch
+
+# Create environment
+after_training = "after_training.mp4"
+trained_env = gym.make("CartPole-v1", render_mode="rgb_array")
+after_video = VideoRecorder(trained_env, after_training)
+
+# Reset environment
+observation, _ = trained_env.reset()
+done = False
+smax = torch.nn.Softmax(dim=-1)
+
+# Get the trained algorithm object (assumes `algo` exists from training)
+# This is the PPO trainer from rllib's unified API
+
+while not done:
+    trained_env.render()
+    after_video.capture_frame()
+
+    # Compute action
+    obs_batch = {"obs": torch.tensor(observation).unsqueeze(0)}
+    module = algo.get_module()  # default module ID is "default_policy"
+    logits = module.forward_inference(obs_batch)["action_dist_inputs"][0]
+    action = torch.multinomial(smax(logits), num_samples=1)[0].item()
+
+    # Take action in the environment
+    observation, reward, terminated, truncated, _ = trained_env.step(action)
+    done = terminated or truncated
+
+# Close video recorder and environment
+after_video.close()
+trained_env.close()
+
+# You should get a video similar to the one below.
+html = render_mp4(after_training)
+HTML(html)
