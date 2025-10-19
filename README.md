@@ -14,4 +14,4 @@ It contains some of the projects I worked on this summer, exploring key concepts
 - Building and evaluating CNNs and decision trees  
 
 ### Reflection
-These projects strengthened my understanding of model design and performance analysis. I also learned how to fine tune these models,interpret results and communicate my understanding clearly.
+These projects strengthened my understanding of model design and performance analysis. I also learned how to fine tune these models, interpret results and communicate my understanding clearly.
